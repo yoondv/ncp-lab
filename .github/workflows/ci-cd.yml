@@ -51,3 +51,78 @@ jobs:
           context: .
           push: true
           tags: ghcr.io/${{ github.repository }}:latest
+
+  deploy:
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger NCP SourceDeploy
+        env:
+          NCP_ACCESS_KEY: ${{ secrets.NCP_ACCESS_KEY }}
+          NCP_SECRET_KEY: ${{ secrets.NCP_SECRET_KEY }}
+        run: |
+          set -Eeuo pipefail
+
+          readonly API_URL="https://vpcsourcedeploy.apigw.ntruss.com"
+          readonly PROJECT_NAME="ncp-lab"
+          readonly STAGE_NAME="real"
+          readonly SCENARIO_NAME="deploy-ghcr"
+
+          ncp_request() {
+            local method="$1"
+            local uri="$2"
+            local timestamp
+            local signature
+
+            timestamp="$(date +%s%3N)"
+            signature="$(
+              printf '%s %s\n%s\n%s' \
+                "$method" "$uri" "$timestamp" "$NCP_ACCESS_KEY" \
+                | openssl dgst -sha256 -hmac "$NCP_SECRET_KEY" -binary \
+                | base64 \
+                | tr -d '\n'
+            )"
+
+            curl --fail-with-body --silent --show-error \
+              --request "$method" \
+              --header "x-ncp-apigw-timestamp: $timestamp" \
+              --header "x-ncp-iam-access-key: $NCP_ACCESS_KEY" \
+              --header "x-ncp-apigw-signature-v2: $signature" \
+              --header "x-ncp-region_code: KR" \
+              --header "Accept: application/json" \
+              "$API_URL$uri"
+          }
+
+          project_response="$(ncp_request GET "/api/v1/project")"
+          project_id="$(
+            jq -er --arg name "$PROJECT_NAME" \
+              '.result.projectList[] | select(.name == $name) | .id' \
+              <<<"$project_response"
+          )"
+
+          stage_response="$(
+            ncp_request GET "/api/v1/project/$project_id/stage"
+          )"
+          stage_id="$(
+            jq -er --arg name "$STAGE_NAME" \
+              '.result.stageList[] | select(.name == $name) | .id' \
+              <<<"$stage_response"
+          )"
+
+          scenario_response="$(
+            ncp_request GET \
+              "/api/v1/project/$project_id/stage/$stage_id/scenario"
+          )"
+          scenario_id="$(
+            jq -er --arg name "$SCENARIO_NAME" \
+              '.result.scenarioList[] | select(.name == $name) | .id' \
+              <<<"$scenario_response"
+          )"
+
+          deploy_response="$(
+            ncp_request POST \
+              "/api/v1/project/$project_id/stage/$stage_id/scenario/$scenario_id/deploy"
+          )"
+          history_id="$(jq -er '.result.historyId' <<<"$deploy_response")"
