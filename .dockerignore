@@ -1,0 +1,17 @@
+.git
+.github
+.gitignore
+.gitattributes
+
+docs
+README.md
+AGENTS.md
+deploy.sh
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+.env
+.env.*
