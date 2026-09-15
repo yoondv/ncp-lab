@@ -58,6 +58,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Upload deployment script
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.NCP_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.NCP_SECRET_KEY }}
+          AWS_DEFAULT_REGION: kr-standard
+        run: |
+          set -Eeuo pipefail
+
+          zip -j deploy.sh.zip deploy.sh
+          aws s3 cp deploy.sh.zip \
+            s3://deploy-ghcr-bucket/deploy.sh.zip \
+            --endpoint-url=https://kr.object.ncloudstorage.com
+
       - name: Trigger NCP SourceDeploy
         env:
           NCP_ACCESS_KEY: ${{ secrets.NCP_ACCESS_KEY }}
