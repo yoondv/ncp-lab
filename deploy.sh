@@ -15,7 +15,7 @@ docker run -d \
 
 for attempt in {1..10}; do
   if docker exec "$CONTAINER_NAME" python -c \
-    "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=2)" \
+    "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)" \
     >/dev/null 2>&1; then
     echo "Deployment succeeded."
     exit 0
