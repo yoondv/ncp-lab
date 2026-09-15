@@ -70,11 +70,13 @@ jobs:
           set -Eeuo pipefail
 
           zip -j deploy.sh.zip deploy.sh
-          aws s3api put-object \
+          aws s3api list-objects-v2 \
             --bucket deploy-ghcr-bucket \
-            --key github-actions-write-test.zip \
-            --body deploy.sh.zip \
-            --endpoint-url=https://kr.object.ncloudstorage.com
+            --max-keys 1 \
+            --endpoint-url=https://kr.object.ncloudstorage.com \
+            >/dev/null
+          echo "Object Storage read permission succeeded."
+
           aws s3 cp deploy.sh.zip \
             s3://deploy-ghcr-bucket/deploy.sh.zip \
             --endpoint-url=https://kr.object.ncloudstorage.com
