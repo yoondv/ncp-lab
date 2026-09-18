@@ -4,10 +4,10 @@
   GitHub Actions, Docker, GHCR, NCP SourceDeploy를 연동한 FastAPI 웹 API 자동 배포 프로젝트
 </p>
 
-## ncp-lab v2
+## ncp-lab v3
 
 **배포 주소**: [http://211.233.214.70](http://211.233.214.70) (현재 운영 중)<br>
-**개발 기간**: 2026.09 ~ 진행 중<br>
+**개발 기간**: 2026.09 ~ 2026.10<br>
 **배포 환경**: NCP Server (Ubuntu 24.04.1 LTS)
 
 ## 목차
@@ -26,9 +26,9 @@
 
 1. **API 자동 테스트**: push와 pull request마다 pytest로 `/`와 `/health`의 상태 코드와 응답 내용을 검사합니다.
 
-2. **이미지 빌드 및 저장**: 테스트를 통과한 `main` 브랜치의 Docker 이미지를 빌드해 GHCR에 게시합니다.
+2. **이미지 빌드 및 저장**: 테스트를 통과한 `main` 브랜치의 Docker 이미지를 빌드해 `latest`와 Git 커밋 SHA 태그로 GHCR에 게시합니다.
 3. **배포 요청 자동화**: GitHub Actions가 `deploy.sh`를 Object Storage에 업로드하고 서명된 NCP API 요청으로 SourceDeploy 시나리오를 실행합니다.
-4. **Blue-Green 무중단 배포**: SourceDeploy Agent가 비활성 컨테이너에 최신 이미지를 실행한 뒤 Nginx의 요청 대상을 전환합니다.
+4. **Blue-Green 무중단 배포**: SourceDeploy Agent가 비활성 컨테이너에 현재 Git 커밋과 일치하는 이미지를 실행한 뒤 Nginx의 요청 대상을 전환합니다.
 5. **헬스 체크 및 롤백**: 새 컨테이너와 Nginx 전환 후의 HTTP 응답을 검사합니다. 모두 성공하면 새 컨테이너로 배포를 완료하고, 실패하면 기존 컨테이너로 요청을 되돌립니다.
 
 ## 기술 스택
@@ -63,16 +63,17 @@ flowchart TB
 
     subgraph GHA[GitHub Actions]
         direction LR
-        CHECK["check<br/>2. pytest API 테스트"]
-        PUBLISH["publish<br/>3. Docker 이미지 빌드 및 게시"]
-        DEPLOY["deploy<br/>4. deploy.sh 업로드 및 배포 요청"]
+        CHECK["2. check"]
+        PUBLISH["3. publish"]
+        DEPLOY["4. deploy"]
         CHECK --> PUBLISH --> DEPLOY
     end
 
     REPO --> CHECK
-    PUBLISH -->|image push| GHCR[(GHCR<br/>Private)]
+    PUBLISH -->|latest 및 SHA image push| GHCR[(GHCR<br/>Private)]
     DEPLOY -->|deploy.sh.zip| STORAGE[(Object Storage<br/>Private)]
     DEPLOY -->|서명된 API 요청| SD[SourceDeploy]
+    SD -.->|10초 간격 배포 이력 조회| DEPLOY
 
     subgraph NCP[NCP Server]
         direction TB
@@ -91,7 +92,7 @@ flowchart TB
 
     STORAGE -. 배포 파일 .-> AGENT
     SD -->|배포 작업 전달| AGENT
-    GHCR -->|docker pull| SCRIPT
+    GHCR -->|커밋 SHA 이미지 pull| SCRIPT
     USER[User] -->|HTTP :80| NGINX
 
     classDef github fill:#24292f,color:#ffffff,stroke:#57606a;
@@ -116,19 +117,21 @@ flowchart TB
 
 - `check` 성공 후 `main` 브랜치 push에서만 실행합니다.
 - `GITHUB_TOKEN`으로 GHCR에 로그인합니다.
-- 저장소의 Dockerfile로 이미지를 빌드하고 `ghcr.io/yoondv/ncp-lab:latest`로 게시합니다.
+- 저장소의 Dockerfile로 이미지를 한 번 빌드하고 `latest`와 전체 Git 커밋 SHA를 태그로 붙여 GHCR에 게시합니다.
+- 이미지에 OCI revision과 source 라벨을 기록해 이미지와 Git 커밋의 관계를 확인할 수 있게 합니다.
 
 #### `deploy`
 
 - `publish` 성공 후 `main` 브랜치 push에서만 실행합니다.
-- `deploy.sh`를 압축해 NCP Object Storage의 배포 파일로 업로드합니다.
+- `deploy.sh`의 이미지 주소를 현재 Git 커밋 SHA 이미지로 지정한 뒤 압축해 NCP Object Storage의 배포 파일로 업로드합니다.
 - GitHub Secrets에 저장된 NCP 인증 키로 HMAC-SHA256 방식의 API 요청 서명을 생성합니다.
 - SourceDeploy의 프로젝트, 스테이지, 시나리오 ID를 조회한 뒤 배포 API를 호출합니다.
+- 배포 상태가 `success`이면 워크플로를 완료하고, 실패·취소·거절·오류·시간 초과이면 워크플로를 실패 처리합니다.
 
 #### `deploy.sh`
 
 - 현재 Nginx upstream 설정을 확인해 Blue와 Green 중 비활성 환경을 선택합니다.
-- GHCR의 최신 이미지를 pull하고 대기 컨테이너를 제거한 뒤, 최신 이미지로 새 컨테이너를 생성합니다.
+- GHCR에서 현재 배포 커밋과 일치하는 이미지를 pull하고 대기 컨테이너를 제거한 뒤 새 컨테이너를 생성합니다.
 - 이후 검사에 성공하면 새 환경으로 배포를 완료하고 기존 컨테이너는 다음 배포 또는 롤백을 위한 대기 상태로 유지합니다.
 
 ## 설계 선택과 이유

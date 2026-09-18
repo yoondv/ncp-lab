@@ -25,7 +25,7 @@ jobs:
           python-version: "3.14.7"
 
       - name: Install dependencies
-        run: python -m pip install fastapi uvicorn pytest httpx
+        run: python -m pip install -r requirements-dev.txt
 
       - name: Run tests
         run: python -m pytest
@@ -54,7 +54,12 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}:latest
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
   deploy:
     needs: publish
@@ -75,12 +80,21 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          zip -j deploy.sh.zip deploy.sh
+          readonly IMAGE="ghcr.io/${GITHUB_REPOSITORY}:${GITHUB_SHA}"
+
+          mkdir deployment-package
+          sed \
+            "s|ghcr.io/yoondv/ncp-lab:latest|$IMAGE|" \
+            deploy.sh > deployment-package/deploy.sh
+          grep -Fq "readonly IMAGE=\"$IMAGE\"" deployment-package/deploy.sh
+
+          echo "Packaging deployment for $IMAGE"
+          zip -j deploy.sh.zip deployment-package/deploy.sh
           aws s3 cp deploy.sh.zip \
             s3://deploy-ghcr-bucket/deploy.sh.zip \
             --endpoint-url=https://kr.object.ncloudstorage.com
 
-      - name: Trigger NCP SourceDeploy
+      - name: Trigger and monitor NCP SourceDeploy
         env:
           NCP_ACCESS_KEY: ${{ secrets.NCP_ACCESS_KEY }}
           NCP_SECRET_KEY: ${{ secrets.NCP_SECRET_KEY }}
@@ -148,3 +162,43 @@ jobs:
               "/api/v1/project/$project_id/stage/$stage_id/scenario/$scenario_id/deploy"
           )"
           history_id="$(jq -er '.result.historyId' <<<"$deploy_response")"
+
+          readonly MAX_POLL_ATTEMPTS=60
+          readonly POLL_INTERVAL_SECONDS=10
+
+          echo "SourceDeploy started."
+
+          for ((attempt = 1; attempt <= MAX_POLL_ATTEMPTS; attempt++)); do
+            history_response="$(
+              ncp_request GET "/api/v1/project/$project_id/history/$history_id"
+            )"
+            deployment_status="$(
+              jq -er '.result.status' <<<"$history_response"
+            )"
+
+            echo "SourceDeploy status: $deployment_status ($attempt/$MAX_POLL_ATTEMPTS)"
+
+            case "$deployment_status" in
+              success)
+                echo "SourceDeploy completed successfully."
+                exit 0
+                ;;
+              fail | reject | canceled | error | canary_reject | canary_waiting_timeout)
+                echo "SourceDeploy failed with status: $deployment_status" >&2
+                exit 1
+                ;;
+              inprogress | pending | canceling | waiting | canary_pending | canary_analyzing | canary_rejecting)
+                ;;
+              *)
+                echo "Unknown SourceDeploy status: $deployment_status" >&2
+                exit 1
+                ;;
+            esac
+
+            if [ "$attempt" -lt "$MAX_POLL_ATTEMPTS" ]; then
+              sleep "$POLL_INTERVAL_SECONDS"
+            fi
+          done
+
+          echo "SourceDeploy did not finish within 10 minutes." >&2
+          exit 1

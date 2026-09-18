@@ -1,21 +1,5 @@
 # 프로젝트 지침
 
-## 프로젝트 목적
-
-- 이 프로젝트는 CI/CD 파이프라인 구축과 배포 과정을 학습하기 위한 프로젝트다.
-- GitHub Actions, Docker, GitHub Container Registry(GHCR), NCP SourceDeploy, NCP Server를 순서대로 연동한다.
-- 배포 대상은 Python으로 작성한 단일 서버 파일을 기본으로 한다.
-
-## 기술 스택
-
-- Python 3.14.7과 FastAPI를 사용한다.
-- GitHub Actions를 사용해 CI/CD 워크플로를 구성한다.
-- Docker를 사용해 애플리케이션 이미지를 빌드한다.
-- GitHub Container Registry(GHCR)를 사용해 Docker 이미지를 저장하고 관리한다.
-- NCP SourceDeploy를 사용해 배포를 자동화한다.
-- NCP Server의 SourceDeploy Agent가 GHCR 이미지를 pull하고 Docker 컨테이너를 실행한다.
-- Naver Cloud Platform(NCP)을 최종 배포 환경으로 사용한다.
-
 ## 작업 진행 원칙
 
 - 요청을 여러 방식으로 해석할 수 있거나 진행 중 요구사항을 보완해야 한다면 작업을 멈추고 사용자에게 질문한다.
